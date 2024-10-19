@@ -1,6 +1,8 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.118/build/three.module.js';
 
-import {OrbitControls} from 'https://cdn.jsdelivr.net/npm/three@0.118/examples/jsm/controls/OrbitControls.js';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { CharacterControls } from './characterControls';
 
 
 class BasicWorldDemo {
@@ -18,6 +20,12 @@ class BasicWorldDemo {
     this._threejs.setSize(window.innerWidth, window.innerHeight);
 
     document.body.appendChild(this._threejs.domElement);
+
+    // RENDERER
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.shadowMap.enabled = true
 
     window.addEventListener('resize', () => {
       this._OnWindowResize();
@@ -56,8 +64,12 @@ class BasicWorldDemo {
 
     const controls = new OrbitControls(
       this._camera, this._threejs.domElement);
-    controls.target.set(0, 20, 0);
-    controls.update();
+      controls.enableDamping = true
+      controls.minDistance = 5
+      controls.maxDistance = 15
+      controls.enablePan = false
+      controls.maxPolarAngle = Math.PI / 2 - 0.05
+      controls.update();
 
     const loader = new THREE.CubeTextureLoader();
     const texture = loader.load([
@@ -81,22 +93,7 @@ class BasicWorldDemo {
     this._scene.add(plane);
     
     const cylinderGeometry = new THREE.CylinderGeometry(
-      // radiusTop: 
-      1, 
-      // radiusBottom: 
-      1, 
-      // height: 
-      2, 
-      // radialSegments: 
-      32, 
-      // heightSegments: 
-      1, 
-      // openEnded: 
-      false, 
-      // thetaStart: 
-      0, 
-      // thetaLength: 
-      Math.PI * 2
+      1,1,2,32,1,false,0,Math.PI * 2
     );
     
     const cylinderMaterial = new THREE.MeshStandardMaterial({
@@ -122,6 +119,31 @@ class BasicWorldDemo {
     box.castShadow = true;
     box.receiveShadow = true;
     this._scene.add(box);
+
+
+    new GLTFLoader().load('models/Soldier.glb', (gltf) => {
+      const model = gltf.scene;
+      model.traverse(function (object) {
+          if (object.isMesh) {
+            object.material.skinning = true;
+            object.castShadow = true;
+            object.receiveShadow = true;
+          }
+      });
+  
+      this._scene.add(model); 
+  
+      const gltfAnimations = gltf.animations;
+      const mixer = new THREE.AnimationMixer(model);
+      const animationsMap = new Map();
+      gltfAnimations.filter(a => a.name != 'TPose').forEach(a => {
+          animationsMap.set(a.name, mixer.clipAction(a));
+      });
+      model.position.set(20, 1, 20);
+      model.scale.set(3,3,3);
+      CharacterControls = new CharacterControls(model, mixer, animationsMap, controls, this._camera,  'Idle');
+  });
+  
 
     this._RAF();
     
@@ -177,7 +199,6 @@ class BasicWorldDemo {
       const normalizedDirectionVector = normalizeDirectionVector(directionVector);
       box.position.x += normalizedDirectionVector.x * distance;
       box.position.z += normalizedDirectionVector.z * distance;
-      //updateCameraTarget(box.position.x,box.position.z);
     }
     
     function moveAwayFromOrigin(box, distance) {
@@ -185,20 +206,7 @@ class BasicWorldDemo {
       const normalizedDirectionVector = normalizeDirectionVector(directionVector);
       box.position.x += normalizedDirectionVector.x * distance;
       box.position.z += normalizedDirectionVector.z * distance;
-      //updateCameraTarget(box.position.x,box.position.z);
     }
-
-  //   function updateCameraTarget(moveX, moveZ) {
-  //     // move camera
-  //     this._camera.position.x += moveX
-  //     this._camera.position.z += moveZ
-
-  //     // update camera target
-  //     this.cameraTarget.x = this.model.position.x
-  //     this.cameraTarget.y = this.model.position.y + 1
-  //     this.cameraTarget.z = this.model.position.z
-  //     this.orbitControl.target = this.cameraTarget
-  // }
     
     let theta = 0;
 
@@ -213,7 +221,6 @@ class BasicWorldDemo {
         const updatePos = calculateCircleCircumferencePoint(calculateDistance(box.position.x,box.position.z,0,0),theta);
         box.position.x = updatePos.x;
         box.position.z = updatePos.z;
-        //updateCameraTarget(updatePos.x,updatePos.z);
       }
     });
     document.addEventListener('keydown', (event) => {
@@ -227,11 +234,43 @@ class BasicWorldDemo {
         const updatePos = calculateCircleCircumferencePoint(calculateDistance(box.position.x,box.position.z,0,0),theta);
         box.position.x = updatePos.x;
         box.position.z = updatePos.z;
-        //updateCameraTarget(updatePos.x,updatePos.z);
       }
     });
+
+    const keysPressed = {};
+
+document.addEventListener('keydown', (event) => {
+    if (event.shiftKey && CharacterControls) {
+        CharacterControls.switchRunToggle();
+    } else {
+        keysPressed[event.key.toLowerCase()] = true; // Store the key press
+    }
+}, false);
+
+document.addEventListener('keyup', (event) => {
+    keysPressed[event.key.toLowerCase()] = false; // Remove the key press
+}, false);
+
+const clock = new THREE.Clock();
+
+    function animate() {
+      let mixerUpdateDelta = clock.getDelta();
   
+      if (CharacterControls) {
+          CharacterControls.update(mixerUpdateDelta, keysPressed);
+          console.log('Current Action:', CharacterControls.currentAction); 
+      }
+  
+      orbitControls.update();
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
   }
+  document.body.appendChild(renderer.domElement);
+  animate();
+  
+}
+
+  
  
   _OnWindowResize() {
     this._camera.aspect = window.innerWidth / window.innerHeight;
@@ -248,40 +287,6 @@ class BasicWorldDemo {
 
   
  }
-
-// function isWKeyPressed() {
-//     // Check if the 'w' key is currently pressed.
-//     return event.key === 'w';
-//   }
- 
-//   function isAKeyPressed() {
-//     // Check if the 'w' key is currently pressed.
-//     return event.key === 'a';
-//   }
-//   function isSKeyPressed() {
-//     // Check if the 'w' key is currently pressed.
-//     return event.key === 's';
-//   }
-//   function isDKeyPressed() {
-//     // Check if the 'w' key is currently pressed.
-//     return event.key === 'd';
-//   }  
-
-//   document.addEventListener('keydown', function(event) {
-//     if (isWKeyPressed()) {
-//         box.position.x += 1;
-//       console.log("The 'w' key is pressed!");
-//     }
-//     else if (isAKeyPressed()){
-//         console.log("The 'a' key is pressed!");
-//     }
-//     else if (isSKeyPressed()){
-//         console.log("The 's' key is pressed!");
-//     }
-//     else if (isDKeyPressed()){
-//         console.log("The 'd' key is pressed!");
-//     }
-//   });
 
 
 
